@@ -263,10 +263,16 @@ function TeamChallenges({ team, game }) {
     if (newlyApproved.length > 0 && !isFirstLoad) {
       setCelebratingChallengeId(newlyApproved[0]);
       setEncouragement(ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)]);
-      const t = setTimeout(() => setCelebratingChallengeId(null), 3000);
-      return () => clearTimeout(t);
     }
   }, [data]);
+
+  // Timer d'expiration de la célébration, séparé du polling : ne dépend que de
+  // celebratingChallengeId pour ne jamais être réinitialisé par un tick de polling.
+  useEffect(() => {
+    if (!celebratingChallengeId) return;
+    const t = setTimeout(() => setCelebratingChallengeId(null), 3000);
+    return () => clearTimeout(t);
+  }, [celebratingChallengeId]);
 
   // Calcul sûr du défi courant même avant que `data` soit chargé, pour respecter les règles des hooks
   const safeQueue = data?.team?.challenge_queue || [];
@@ -502,7 +508,15 @@ function TeamVoting({ team, game }) {
 function TeamRevealView({ candidateSubs, allVotes, teamById }) {
   const voteCountBySub = {};
   allVotes.forEach((v) => { voteCountBySub[v.voted_for_submission_id] = (voteCountBySub[v.voted_for_submission_id] || 0) + 1; });
-  if (candidateSubs.length === 0) return null;
+
+  if (!candidateSubs || candidateSubs.length === 0) {
+    return (
+      <div style={S.revealWrap}>
+        <p style={S.lead}>En attente du prochain défi...</p>
+      </div>
+    );
+  }
+
   const ranked = [...candidateSubs].sort((a, b) => (voteCountBySub[b.id] || 0) - (voteCountBySub[a.id] || 0));
   const winner = ranked[0];
   const winnerVotes = voteCountBySub[winner.id] || 0;
