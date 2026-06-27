@@ -76,8 +76,18 @@ export default function AdminApp({ onExit }) {
   }, [game?.id]);
 
   async function updatePhase(phase) {
-    await sbFetch(`games?id=eq.${game.id}`, { method: 'PATCH', body: JSON.stringify({ phase }) });
-    setGame({ ...game, phase });
+    const patch = { phase };
+    if (phase === 'voting') {
+      // Repart toujours d'un état de vote propre, même si un résidu d'un test
+      // précédent traînait en base (vote_started_at obsolète, etc.).
+      patch.vote_order = [];
+      patch.vote_index = 0;
+      patch.vote_challenge_id = null;
+      patch.vote_started_at = null;
+      patch.vote_revealed = false;
+    }
+    await sbFetch(`games?id=eq.${game.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+    setGame({ ...game, ...patch });
     setTab(phase === 'voting' ? 'vote' : phase === 'finished' ? 'scores' : 'live');
   }
 
@@ -459,12 +469,17 @@ function VoteMonitorView({ game, onFinish }) {
 
   // Calcul sûr du temps restant, même avant que `data` soit chargé, pour respecter les règles des hooks
   const safeGame = data?.game;
-  const safeRemaining = safeGame?.vote_started_at
-    ? Math.max(0, Math.ceil((safeGame.vote_duration_seconds || 30) - (Date.now() - new Date(safeGame.vote_started_at).getTime()) / 1000))
+  const safeElapsed = safeGame?.vote_started_at ? (Date.now() - new Date(safeGame.vote_started_at).getTime()) / 1000 : null;
+  const safeRemaining = safeElapsed != null
+    ? Math.max(0, Math.ceil((safeGame.vote_duration_seconds || 30) - safeElapsed))
     : null;
 
   useEffect(() => {
-    if (safeGame && safeRemaining === 0 && !safeGame.vote_revealed && safeGame.vote_started_at) {
+    // Garde-fou : on n'auto-révèle que si le vote a réellement démarré il y a peu
+    // (moins de 2x la durée prévue). Un résidu de données avec un vieux timestamp
+    // ne doit jamais déclencher une révélation instantanée au montage du composant.
+    const isGenuinelyExpired = safeGame?.vote_duration_seconds && safeElapsed != null && safeElapsed < safeGame.vote_duration_seconds * 3;
+    if (safeGame && safeRemaining === 0 && !safeGame.vote_revealed && safeGame.vote_started_at && isGenuinelyExpired) {
       sbFetch(`games?id=eq.${game.id}`, { method: 'PATCH', body: JSON.stringify({ vote_revealed: true }) }).catch(() => {});
     }
   }, [safeRemaining === 0, safeGame?.vote_revealed, safeGame?.vote_started_at]);
@@ -610,6 +625,17 @@ function VoteResultReveal({ candidateSubs, voteCountBySub, teamById, onNext, isL
     const t = setTimeout(() => setAutoAdvanceIn((n) => n - 1), 1000);
     return () => clearTimeout(t);
   }, [autoAdvanceIn]);
+
+  if (!candidateSubs || candidateSubs.length === 0) {
+    return (
+      <div style={S.revealWrap}>
+        <p style={S.bodyText}>Aucune photo pour ce défi. Passage au suivant dans {autoAdvanceIn}s...</p>
+        <button style={S.secondaryBtn} onClick={onNext}>
+          {isLast ? 'Voir le classement' : 'Défi suivant'} <Icon.arrowRight style={S.iconSm} />
+        </button>
+      </div>
+    );
+  }
 
   const ranked = [...candidateSubs].sort((a, b) => (voteCountBySub[b.id] || 0) - (voteCountBySub[a.id] || 0));
   const winner = ranked[0];
