@@ -247,6 +247,7 @@ function TeamChallenges({ team, game }) {
 
   const [celebratingChallengeId, setCelebratingChallengeId] = useState(null);
   const previousApprovedIds = useRef(new Set());
+  const hasLoadedOnce = useRef(false);
   const [encouragement, setEncouragement] = useState(ENCOURAGEMENTS[0]);
   const [raceCount, setRaceCount] = useState(null);
 
@@ -254,13 +255,17 @@ function TeamChallenges({ team, game }) {
     if (!data) return;
     const approvedNow = new Set(data.subs.filter((s) => s.status === 'approved').map((s) => s.challenge_id));
     const newlyApproved = [...approvedNow].filter((id) => !previousApprovedIds.current.has(id));
-    if (newlyApproved.length > 0 && previousApprovedIds.current.size > 0) {
+    const isFirstLoad = !hasLoadedOnce.current;
+    // On met à jour la référence immédiatement pour éviter de redétecter le même défi
+    // comme "nouveau" lors du prochain tick de polling pendant que la célébration est encore affichée.
+    previousApprovedIds.current = approvedNow;
+    hasLoadedOnce.current = true;
+    if (newlyApproved.length > 0 && !isFirstLoad) {
       setCelebratingChallengeId(newlyApproved[0]);
       setEncouragement(ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)]);
-      const t = setTimeout(() => setCelebratingChallengeId(null), 1800);
+      const t = setTimeout(() => setCelebratingChallengeId(null), 3000);
       return () => clearTimeout(t);
     }
-    previousApprovedIds.current = approvedNow;
   }, [data]);
 
   // Calcul sûr du défi courant même avant que `data` soit chargé, pour respecter les règles des hooks
@@ -450,7 +455,7 @@ function TeamVoting({ team, game }) {
       <div style={S.contentWrap}>
         <TeamRevealView
           candidateSubs={subs.filter((s) => s.challenge_id === freshGame.vote_challenge_id)}
-          allVotes={votes}
+          allVotes={votesForChallenge}
           teamById={teamById}
         />
       </div>
