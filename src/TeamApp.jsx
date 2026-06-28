@@ -274,12 +274,15 @@ function TeamChallenges({ team, game }) {
     return () => clearTimeout(t);
   }, [celebratingChallengeId]);
 
-  // Calcul sûr du défi courant même avant que `data` soit chargé, pour respecter les règles des hooks
+  // Calcul sûr du défi courant même avant que `data` soit chargé, pour respecter les règles des hooks.
+  // Un défi est "à faire" s'il n'a aucune soumission, ou si sa soumission a été refusée.
+  // Un défi "pending" (envoyé, en attente de validation) compte comme déjà traité par l'équipe :
+  // elle avance directement au suivant, la validation se fait en arrière-plan.
   const safeQueue = data?.team?.challenge_queue || [];
   const safeSubByChallenge = data ? Object.fromEntries(data.subs.map((s) => [s.challenge_id, s])) : {};
   const liveCurrentChallengeId = safeQueue.find((id) => {
     const sub = safeSubByChallenge[id];
-    return !sub || sub.status !== 'approved';
+    return !sub || sub.status === 'rejected';
   });
 
   useEffect(() => {
@@ -302,17 +305,16 @@ function TeamChallenges({ team, game }) {
   const subByChallenge = Object.fromEntries(subs.map((s) => [s.challenge_id, s]));
   const queue = freshTeam.challenge_queue || [];
 
-  // Le défi courant = premier de la file qui n'est pas encore approuvé,
-  // ou qu'on vient de soumettre localement (pour éviter un flash de retour en arrière pendant le polling)
+  // Le défi courant = premier de la file sans soumission, ou refusé (à refaire).
+  // Un défi "pending" ou "approved" est considéré comme passé pour la progression de l'équipe.
   const currentChallengeId = queue.find((id) => {
     const sub = subByChallenge[id];
-    return !sub || sub.status !== 'approved';
+    return !sub || sub.status === 'rejected';
   });
 
-  const approvedCount = queue.length - queue.filter((id) => {
-    const sub = subByChallenge[id];
-    return !sub || sub.status !== 'approved';
-  }).length;
+  // La barre de progression compte les défis réellement validés par l'admin,
+  // pas seulement envoyés — pour refléter l'avancement réel reconnu.
+  const approvedCount = queue.filter((id) => subByChallenge[id]?.status === 'approved').length;
 
   if (celebratingChallengeId) {
     return (
